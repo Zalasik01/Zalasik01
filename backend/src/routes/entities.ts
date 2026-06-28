@@ -1,32 +1,42 @@
 import { Router, Request, Response } from 'express';
-import { getDb } from '../db/database';
+import { getDb, initSchema } from '../db/database';
 import { authenticate } from '../middleware/auth';
-import { Entity } from '../types';
 
 const router = Router();
 
-router.get('/:id', authenticate, (req: Request, res: Response) => {
+router.get('/:id', authenticate, async (req: Request, res: Response) => {
   const db = getDb();
-  const entity = db.prepare('SELECT * FROM entities WHERE id = ?').get(req.params.id) as Entity | undefined;
+  await initSchema();
 
-  if (!entity) {
-    res.status(404).json({ error: 'Entidade não encontrada.' });
-    return;
-  }
+  const entityResult = await db.execute({ sql: 'SELECT * FROM entities WHERE id = ?', args: [req.params.id] });
+  const entity = entityResult.rows[0] as any;
 
-  const addresses = db.prepare('SELECT * FROM addresses WHERE entity_id = ? ORDER BY is_current DESC').all(entity.id);
-  const phones = db.prepare('SELECT * FROM phones WHERE entity_id = ?').all(entity.id);
-  const emails = db.prepare('SELECT * FROM emails WHERE entity_id = ?').all(entity.id);
-  const processes = db.prepare('SELECT * FROM legal_processes WHERE entity_id = ? ORDER BY last_update DESC').all(entity.id);
+  if (!entity) { res.status(404).json({ error: 'Entidade nao encontrada.' }); return; }
+
+  const [addresses, phones, emails, processes] = await Promise.all([
+    db.execute({ sql: 'SELECT * FROM addresses WHERE entity_id = ? ORDER BY is_current DESC', args: [entity.id] }),
+    db.execute({ sql: 'SELECT * FROM phones WHERE entity_id = ?', args: [entity.id] }),
+    db.execute({ sql: 'SELECT * FROM emails WHERE entity_id = ?', args: [entity.id] }),
+    db.execute({ sql: 'SELECT * FROM legal_processes WHERE entity_id = ? ORDER BY last_update DESC', args: [entity.id] })
+  ]);
 
   let detail = null;
   if (entity.type === 'person') {
-    detail = db.prepare('SELECT * FROM person_details WHERE entity_id = ?').get(entity.id);
+    const r = await db.execute({ sql: 'SELECT * FROM person_details WHERE entity_id = ?', args: [entity.id] });
+    detail = r.rows[0] || null;
   } else {
-    detail = db.prepare('SELECT * FROM company_details WHERE entity_id = ?').get(entity.id);
+    const r = await db.execute({ sql: 'SELECT * FROM company_details WHERE entity_id = ?', args: [entity.id] });
+    detail = r.rows[0] || null;
   }
 
-  res.json({ entity, detail, addresses, phones, emails, processes });
+  res.json({
+    entity,
+    detail,
+    addresses: addresses.rows,
+    phones: phones.rows,
+    emails: emails.rows,
+    processes: processes.rows
+  });
 });
 
 export default router;

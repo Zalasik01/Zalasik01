@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import { initSchema } from './db/database';
 import authRoutes from './routes/auth';
 import searchRoutes from './routes/search';
 import entityRoutes from './routes/entities';
@@ -22,8 +23,8 @@ app.get('/api/health', (_, res) => res.json({ status: 'ok', timestamp: new Date(
 app.use(express.static(FRONTEND_DIST));
 app.get('*', (_, res) => res.sendFile(path.join(FRONTEND_DIST, 'index.html')));
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+initSchema().then(() => {
+  app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+}).catch(console.error);
 
 export default app;
