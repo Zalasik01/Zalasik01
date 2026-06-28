@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../lib/api';
 import { SearchHistory, User } from '../types';
-import { biometriaSuportada, registrarBiometria, statusBiometria } from '../lib/webauthn';
+import { biometriaSuportada, registrarBiometria, statusBiometria, setBioEmail } from '../lib/webauthn';
 
 interface Stats {
   user: User;
@@ -57,6 +57,7 @@ export default function Dashboard({ user, onUserUpdate }: Props) {
     try {
       const label = `${navigator.platform || 'Dispositivo'}`;
       await registrarBiometria(label);
+      if (currentUser?.email) setBioEmail(currentUser.email);
       setBioEnabled(true);
       setBioMsg('Biometria ativada! Agora voce pode entrar com Face ID, Touch ID ou digital.');
     } catch (err: any) {
