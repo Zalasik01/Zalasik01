@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../lib/api';
 import { SearchHistory, User } from '../types';
+import { biometriaSuportada, registrarBiometria, statusBiometria } from '../lib/webauthn';
 
 interface Stats {
   user: User;
@@ -31,6 +32,9 @@ export default function Dashboard({ user, onUserUpdate }: Props) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [history, setHistory] = useState<SearchHistory[]>([]);
   const [loading, setLoading] = useState(true);
+  const [bioEnabled, setBioEnabled] = useState(false);
+  const [bioLoading, setBioLoading] = useState(false);
+  const [bioMsg, setBioMsg] = useState('');
 
   useEffect(() => {
     Promise.all([
@@ -41,7 +45,29 @@ export default function Dashboard({ user, onUserUpdate }: Props) {
       setHistory(histRes.data.data);
       onUserUpdate(statsRes.data.user);
     }).finally(() => setLoading(false));
+
+    if (biometriaSuportada()) {
+      statusBiometria().then((s) => setBioEnabled(s.enabled)).catch(() => {});
+    }
   }, []);
+
+  const ativarBiometria = async () => {
+    setBioLoading(true);
+    setBioMsg('');
+    try {
+      const label = `${navigator.platform || 'Dispositivo'}`;
+      await registrarBiometria(label);
+      setBioEnabled(true);
+      setBioMsg('Biometria ativada! Agora voce pode entrar com Face ID, Touch ID ou digital.');
+    } catch (err: any) {
+      const msg = err?.name === 'NotAllowedError'
+        ? 'Cadastro cancelado.'
+        : err.response?.data?.error || 'Nao foi possivel ativar a biometria neste dispositivo.';
+      setBioMsg(msg);
+    } finally {
+      setBioLoading(false);
+    }
+  };
 
   const planLabels: Record<string, string> = { free: 'Free', pro: 'Pro', enterprise: 'Enterprise' };
   const planColors: Record<string, string> = {
@@ -222,6 +248,37 @@ export default function Dashboard({ user, onUserUpdate }: Props) {
               )}
             </div>
           </div>
+
+          {/* Biometria */}
+          {biometriaSuportada() && (
+            <div className="bg-white rounded-xl border border-gray-100 p-5">
+              <div className="flex items-center gap-2 mb-1.5">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4a48e4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 11c0 3-1 5-1 5"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M12 12a6 6 0 0 1 6 6"/><circle cx="12" cy="12" r="1"/>
+                </svg>
+                <h3 className="font-semibold text-gray-800 text-sm">Login por biometria</h3>
+              </div>
+              {bioEnabled ? (
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">Ativada</span>
+                  <button onClick={ativarBiometria} disabled={bioLoading} className="text-xs text-brand-600 hover:underline disabled:opacity-50">
+                    Adicionar outro dispositivo
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <p className="text-xs text-gray-500 mb-3 leading-relaxed">
+                    Use Face ID, Touch ID ou a digital do celular para entrar sem senha.
+                  </p>
+                  <button onClick={ativarBiometria} disabled={bioLoading}
+                    className="w-full py-2.5 bg-brand-600 text-white font-semibold text-sm rounded-lg hover:bg-brand-700 transition-colors disabled:opacity-60">
+                    {bioLoading ? 'Aguardando...' : 'Ativar biometria'}
+                  </button>
+                </>
+              )}
+              {bioMsg && <p className="text-xs text-gray-500 mt-2 leading-relaxed">{bioMsg}</p>}
+            </div>
+          )}
 
           {/* Upgrade */}
           {currentUser?.plan === 'free' && (

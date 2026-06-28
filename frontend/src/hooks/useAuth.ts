@@ -24,6 +24,13 @@ export function useAuth() {
     return data.user as User;
   }, []);
 
+  const loginWithSession = useCallback((token: string, sessionUser: User) => {
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(sessionUser));
+    setUser(sessionUser);
+    return sessionUser;
+  }, []);
+
   const logout = useCallback(() => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
@@ -39,5 +46,5 @@ export function useAuth() {
     });
   }, []);
 
-  return { user, login, register, logout, updateUser };
+  return { user, login, register, logout, updateUser, loginWithSession };
 }

@@ -3,6 +3,7 @@ import cors from 'cors';
 import path from 'path';
 import { initSchema } from './db/database';
 import authRoutes from './routes/auth';
+import webauthnRoutes from './routes/webauthn';
 import searchRoutes from './routes/search';
 import entityRoutes from './routes/entities';
 import pessoaRoutes from './routes/pessoa';
@@ -15,6 +16,7 @@ app.use(cors());
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
+app.use('/api/auth/webauthn', webauthnRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/entities', entityRoutes);
 app.use('/api/pessoa', pessoaRoutes);

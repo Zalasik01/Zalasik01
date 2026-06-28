@@ -15,14 +15,14 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const { user, login, register, logout, updateUser } = useAuth();
+  const { user, login, register, logout, updateUser, loginWithSession } = useAuth();
 
   return (
     <BrowserRouter>
       <Layout user={user} onLogout={logout}>
         <Routes>
           <Route path="/" element={<Landing user={user} />} />
-          <Route path="/login" element={<Login onLogin={login} />} />
+          <Route path="/login" element={<Login onLogin={login} onSession={loginWithSession} />} />
           <Route path="/register" element={<Register onRegister={register} />} />
           <Route
             path="/search"

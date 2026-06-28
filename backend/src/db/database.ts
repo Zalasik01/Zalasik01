@@ -75,9 +75,26 @@ export async function initSchema(): Promise<void> {
       results_count INTEGER NOT NULL DEFAULT 0,
       searched_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`,
+    `CREATE TABLE IF NOT EXISTS webauthn_credentials (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      credential_id TEXT UNIQUE NOT NULL,
+      public_key TEXT NOT NULL,
+      counter INTEGER NOT NULL DEFAULT 0,
+      transports TEXT,
+      device_label TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS webauthn_challenges (
+      id TEXT PRIMARY KEY,
+      challenge TEXT NOT NULL,
+      user_id INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name)`,
     `CREATE INDEX IF NOT EXISTS idx_entities_document ON entities(document)`,
     `CREATE INDEX IF NOT EXISTS idx_search_history_user ON search_history(user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_webauthn_user ON webauthn_credentials(user_id)`,
   ];
 
   for (const sql of stmts) {
