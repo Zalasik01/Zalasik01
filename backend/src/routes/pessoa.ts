@@ -136,30 +136,70 @@ async function searchByNumber(numero: string): Promise<any[]> {
   }
 }
 
-router.get('/servidores', async (req: Request, res: Response) => {
-  const { nome, pagina = '1' } = req.query as Record<string, string>;
+const TRANSP_BASE = 'https://api.portaldatransparencia.gov.br/api-de-dados';
+
+async function buscarPEP(nome: string): Promise<any[]> {
+  try {
+    const url = `${TRANSP_BASE}/peps?nome=${encodeURIComponent(nome)}&pagina=1`;
+    const r = await httpsGet(url, { 'chave-api-dados': TRANSPARENCIA_KEY, 'Accept': 'application/json' });
+    if (r.status !== 200 || !Array.isArray(r.body)) return [];
+    return r.body.map((p: any) => ({
+      nome: (p.nome || '').trim(),
+      cpf: (p.cpf || '').trim() || null,
+      funcao: (p.descricao_funcao || '').trim() || null,
+      orgao: (p.nome_orgao || '').trim() || null,
+      inicio_exercicio: p.dt_inicio_exercicio || null,
+      fim_exercicio: p.dt_fim_exercicio || null
+    }));
+  } catch { return []; }
+}
+
+async function buscarSancoes(nome: string, lista: 'ceis' | 'cnep'): Promise<any[]> {
+  try {
+    const url = `${TRANSP_BASE}/${lista}?nomeSancionado=${encodeURIComponent(nome)}&pagina=1`;
+    const r = await httpsGet(url, { 'chave-api-dados': TRANSPARENCIA_KEY, 'Accept': 'application/json' });
+    if (r.status !== 200 || !Array.isArray(r.body)) return [];
+    return r.body.map((s: any) => ({
+      nome: s.pessoa?.nome || s.nomeSancionado || null,
+      documento: s.pessoa?.cpfFormatado || s.pessoa?.cnpjFormatado || null,
+      tipo_pessoa: s.pessoa?.tipo || null,
+      tipo_sancao: s.tipoSancao?.descricaoResumida || null,
+      orgao_sancionador: s.orgaoSancionador?.nome || null,
+      fonte: s.fonteSancao?.nomeExibicao || null,
+      inicio_sancao: s.dataInicioSancao || null,
+      fim_sancao: s.dataFimSancao || null,
+      lista: lista.toUpperCase()
+    })).filter((s: any) => s.nome);
+  } catch { return []; }
+}
+
+/**
+ * Aggregated person/company search by name across the public sources that
+ * actually support name lookups: PEP (politically exposed persons) and the
+ * sanction lists CEIS + CNEP. (The /servidores endpoint requires an SIAPE org
+ * code or CPF, so it cannot be searched by name alone.)
+ */
+router.get('/busca', async (req: Request, res: Response) => {
+  const { nome } = req.query as Record<string, string>;
   if (!nome?.trim()) { res.status(400).json({ error: 'Nome obrigatorio.' }); return; }
   if (!TRANSPARENCIA_KEY) {
     res.status(503).json({ error: 'API nao configurada.', requires_key: true, info: 'Configure TRANSPARENCIA_API_KEY' });
     return;
   }
+  const termo = nome.trim();
   try {
-    const url = `https://api.portaldatransparencia.gov.br/api-de-dados/servidores?nome=${encodeURIComponent(nome)}&pagina=${pagina}&tamanhoPagina=10`;
-    const result = await httpsGet(url, { 'chave-api-dados': TRANSPARENCIA_KEY, 'Accept': 'application/json' });
-    if (result.status !== 200 || !Array.isArray(result.body)) { res.json({ data: [], source: 'Portal da Transparencia' }); return; }
-    const formatted = result.body.map((s: any) => ({
-      id: s.id || s.idServidor,
-      nome: s.nome,
-      cpf: s.cpf || null,
-      orgao: s.orgao?.nome || s.orgaoExercicio?.nome || null,
-      cargo: s.cargo?.nome || s.descricaoCargo || null,
-      funcao: s.funcao?.nome || null,
-      municipio: s.municipioExercicio?.nome || null,
-      uf: s.municipioExercicio?.uf || null,
-      remuneracao: s.remuneracaoBasicaBruta || null,
-      situacao: s.situacaoVinculo?.nome || 'Ativo'
-    }));
-    res.json({ data: formatted, source: 'Portal da Transparencia (Governo Federal)', total: formatted.length });
+    const [pep, ceis, cnep] = await Promise.all([
+      buscarPEP(termo),
+      buscarSancoes(termo, 'ceis'),
+      buscarSancoes(termo, 'cnep')
+    ]);
+    const sancoes = [...ceis, ...cnep];
+    res.json({
+      pep,
+      sancoes,
+      source: 'Portal da Transparencia (Governo Federal)',
+      total: pep.length + sancoes.length
+    });
   } catch {
     res.status(503).json({ error: 'Erro ao consultar Portal da Transparencia.' });
   }
@@ -207,7 +247,12 @@ router.get('/processos', async (req: Request, res: Response) => {
 
 router.get('/status', (_req: Request, res: Response) => {
   res.json({
-    transparencia: { configured: !!TRANSPARENCIA_KEY, env_var: 'TRANSPARENCIA_API_KEY', url: 'https://portaldatransparencia.gov.br/api-de-dados/cadastrar-email' },
+    transparencia: {
+      configured: !!TRANSPARENCIA_KEY,
+      env_var: 'TRANSPARENCIA_API_KEY',
+      url: 'https://portaldatransparencia.gov.br/api-de-dados/cadastrar-email',
+      fontes_por_nome: ['PEP (politicamente expostos)', 'CEIS (inidoneos)', 'CNEP (empresas punidas)']
+    },
     datajud: { configured: true, using_public_key: !process.env.DATAJUD_API_KEY, search_by: 'numero_processo', note: 'API publica nao expoe nomes de partes (LGPD)' }
   });
 });

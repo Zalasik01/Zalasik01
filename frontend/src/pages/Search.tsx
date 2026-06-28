@@ -40,17 +40,25 @@ function SourceBadge({ label, color = 'emerald' }: { label: string; color?: stri
   );
 }
 
-interface Servidor {
-  id: string;
+interface Pep {
   nome: string;
   cpf: string | null;
-  orgao: string | null;
-  cargo: string | null;
   funcao: string | null;
-  municipio: string | null;
-  uf: string | null;
-  remuneracao: number | null;
-  situacao: string;
+  orgao: string | null;
+  inicio_exercicio: string | null;
+  fim_exercicio: string | null;
+}
+
+interface Sancao {
+  nome: string;
+  documento: string | null;
+  tipo_pessoa: string | null;
+  tipo_sancao: string | null;
+  orgao_sancionador: string | null;
+  fonte: string | null;
+  inicio_sancao: string | null;
+  fim_sancao: string | null;
+  lista: string;
 }
 
 interface Processo {
@@ -81,7 +89,8 @@ export default function Search() {
   const [localResults, setLocalResults] = useState<Entity[]>([]);
   const [meta, setMeta] = useState<SearchMeta | null>(null);
   const [cnpjResult, setCnpjResult] = useState<Entity | null>(null);
-  const [servidores, setServidores] = useState<Servidor[]>([]);
+  const [pep, setPep] = useState<Pep[]>([]);
+  const [sancoes, setSancoes] = useState<Sancao[]>([]);
   const [processos, setProcessos] = useState<Processo[]>([]);
   const [nameSearchNote, setNameSearchNote] = useState(false);
   const [apiStatus, setApiStatus] = useState<{ transparencia: { configured: boolean }; datajud: { configured: boolean; using_public_key?: boolean } } | null>(null);
@@ -98,7 +107,8 @@ export default function Search() {
     setError('');
     setCnpjResult(null);
     setLocalResults([]);
-    setServidores([]);
+    setPep([]);
+    setSancoes([]);
     setProcessos([]);
     setNameSearchNote(false);
     setMeta(null);
@@ -118,16 +128,17 @@ export default function Search() {
 
         const promises: Promise<any>[] = [api.get('/search', { params })];
 
-        if ((type === '' || type === 'person') && isPureName(q)) {
-          promises.push(api.get('/pessoa/servidores', { params: { nome: q } }).catch(() => null));
+        if (isPureName(q)) {
+          promises.push(api.get('/pessoa/busca', { params: { nome: q } }).catch(() => null));
           setNameSearchNote(true);
         }
 
-        const [localRes, servidoresRes] = await Promise.all(promises);
+        const [localRes, buscaRes] = await Promise.all(promises);
 
         setLocalResults(localRes.data.data);
         setMeta(localRes.data.meta);
-        if (servidoresRes?.data?.data) setServidores(servidoresRes.data.data);
+        if (buscaRes?.data?.pep) setPep(buscaRes.data.pep);
+        if (buscaRes?.data?.sancoes) setSancoes(buscaRes.data.sancoes);
       }
     } catch (err: any) {
       if (err.response?.data?.upgrade_required) {
@@ -148,7 +159,7 @@ export default function Search() {
     navigate(`/search?${params.toString()}`);
   };
 
-  const hasResults = cnpjResult || localResults.length > 0 || servidores.length > 0 || processos.length > 0;
+  const hasResults = cnpjResult || localResults.length > 0 || pep.length > 0 || sancoes.length > 0 || processos.length > 0;
   const transparenciaNeeded = apiStatus && !apiStatus.transparencia.configured;
 
   return (
@@ -157,20 +168,20 @@ export default function Search() {
         <SearchBar initialQuery={q} initialType={type} />
         {q && (
           <p className="text-xs text-gray-400 mt-2 ml-1">
-            Dica: CNPJ (Receita Federal), nome (servidores publicos) ou numero de processo CNJ (20 digitos).
+            Dica: CNPJ (Receita Federal), nome (politicos e sancionados) ou numero de processo CNJ (20 digitos).
           </p>
         )}
       </div>
 
-      {/* Process-by-name limitation notice */}
+      {/* Name-search scope notice */}
       {!loading && nameSearchNote && (
         <div className="bg-blue-50 border border-blue-100 rounded-xl px-5 py-4 mb-6 flex items-start gap-3">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 mt-0.5">
             <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
           </svg>
           <div className="text-sm">
-            <p className="font-semibold text-blue-800 mb-1">Busca de processos por nome</p>
-            <p className="text-blue-700">A API publica do CNJ (DataJud) nao expoe nomes das partes por exigencia da LGPD. Para consultar um processo, informe o numero CNJ completo (20 digitos).</p>
+            <p className="font-semibold text-blue-800 mb-1">Sobre a busca por nome</p>
+            <p className="text-blue-700">Por exigencia da LGPD, nao existe base publica com dados de qualquer cidadao por nome. A busca cobre fontes oficiais abertas: pessoas politicamente expostas (PEP), sancionados (CEIS/CNEP) e a base local. Para processos, informe o numero CNJ (20 digitos); para empresas, o CNPJ.</p>
           </div>
         </div>
       )}
@@ -182,7 +193,7 @@ export default function Search() {
             <circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>
           </svg>
           <div className="text-sm">
-            <p className="font-semibold text-amber-800 mb-1">Para buscar servidores publicos</p>
+            <p className="font-semibold text-amber-800 mb-1">Para buscar dados governamentais por nome</p>
             <p className="text-amber-700">Cadastre sua chave gratuita em <span className="font-mono text-xs bg-amber-100 px-1 rounded">portaldatransparencia.gov.br/api-de-dados/cadastrar-email</span> e configure <span className="font-mono text-xs bg-amber-100 px-1 rounded">TRANSPARENCIA_API_KEY</span> no Railway.</p>
           </div>
         </div>
@@ -248,34 +259,57 @@ export default function Search() {
             </section>
           )}
 
-          {/* Servidores Públicos */}
-          {servidores.length > 0 && (
+          {/* Pessoas Politicamente Expostas (PEP) */}
+          {pep.length > 0 && (
             <section>
               <div className="flex items-center gap-2 mb-3">
-                <h2 className="text-sm font-semibold text-gray-700">Servidores Publicos ({servidores.length})</h2>
+                <h2 className="text-sm font-semibold text-gray-700">Pessoas Politicamente Expostas ({pep.length})</h2>
                 <SourceBadge label="Portal da Transparencia" color="blue" />
               </div>
               <div className="space-y-3">
-                {servidores.map((s, i) => (
-                  <div key={s.id || i} className="bg-white rounded-xl border border-blue-100 p-5">
+                {pep.map((p, i) => (
+                  <div key={i} className="bg-white rounded-xl border border-blue-100 p-5">
                     <div className="flex items-start gap-3">
                       <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
                         <PersonIcon />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-gray-900">{s.nome}</h3>
+                        <h3 className="font-semibold text-gray-900">{p.nome}</h3>
                         <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
-                          {s.orgao && <span>Orgao: <span className="text-gray-700 font-medium">{s.orgao}</span></span>}
-                          {s.cargo && <span>Cargo: <span className="text-gray-700 font-medium">{s.cargo}</span></span>}
-                          {s.municipio && <span>Municipio: <span className="text-gray-700 font-medium">{s.municipio}/{s.uf}</span></span>}
-                          {s.remuneracao && (
-                            <span>Remuneracao: <span className="text-gray-700 font-medium">
-                              {s.remuneracao.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                            </span></span>
-                          )}
+                          {p.cpf && <span>CPF: <span className="text-gray-700 font-mono">{p.cpf}</span></span>}
+                          {p.funcao && <span>Funcao: <span className="text-gray-700 font-medium">{p.funcao}</span></span>}
+                          {p.orgao && <span>Orgao/Local: <span className="text-gray-700 font-medium">{p.orgao}</span></span>}
+                          {p.inicio_exercicio && <span>Exercicio: <span className="text-gray-700 font-medium">{new Date(p.inicio_exercicio).toLocaleDateString('pt-BR')}{p.fim_exercicio ? ' a ' + new Date(p.fim_exercicio).toLocaleDateString('pt-BR') : ''}</span></span>}
                         </div>
                       </div>
-                      <StatusBadge status="active" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Sanções (CEIS / CNEP) */}
+          {sancoes.length > 0 && (
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <h2 className="text-sm font-semibold text-gray-700">Sancoes e Inidoneidade ({sancoes.length})</h2>
+                <SourceBadge label="CEIS / CNEP" color="purple" />
+              </div>
+              <div className="space-y-3">
+                {sancoes.map((s, i) => (
+                  <div key={i} className="bg-white rounded-xl border border-red-100 p-5">
+                    <div className="flex items-start justify-between gap-3 mb-1">
+                      <h3 className="font-semibold text-gray-900 min-w-0">{s.nome}</h3>
+                      <span className="text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded font-medium flex-shrink-0">{s.lista}</span>
+                    </div>
+                    {s.tipo_sancao && <p className="text-sm text-gray-700 mb-1">{s.tipo_sancao}</p>}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
+                      {s.documento && <span className="font-mono">{s.documento}</span>}
+                      {s.tipo_pessoa && <span>{s.tipo_pessoa}</span>}
+                      {s.orgao_sancionador && <span>Orgao: {s.orgao_sancionador}</span>}
+                      {s.inicio_sancao && <span>Periodo: {s.inicio_sancao}{s.fim_sancao ? ' a ' + s.fim_sancao : ''}</span>}
+                      {s.fonte && <span>Fonte: {s.fonte}</span>}
                     </div>
                   </div>
                 ))}
@@ -396,8 +430,8 @@ export default function Search() {
                 </svg>
               </div>
               <h3 className="text-lg font-semibold text-gray-900 mb-1">Nenhum resultado encontrado</h3>
-              <p className="text-gray-500 text-sm max-w-sm mx-auto">
-                Para CNPJ, digite o numero completo. Para pessoa fisica, use o nome completo. Processos judiciais sao buscados automaticamente no CNJ DataJud.
+              <p className="text-gray-500 text-sm max-w-md mx-auto">
+                Nomes so retornam dados quando a pessoa tem cargo politico (PEP) ou sancao (CEIS/CNEP) — dados de cidadaos comuns nao sao publicos (LGPD). Para empresas, use o CNPJ; para processos, o numero CNJ (20 digitos).
               </p>
             </div>
           )}
