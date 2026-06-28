@@ -79,6 +79,19 @@ interface Processo {
   fonte_tribunal: string;
 }
 
+interface ProcessoNome {
+  numero: string | null;
+  tribunal: string | null;
+  orgao: string | null;
+  classe: string | null;
+  tipo_comunicacao: string | null;
+  data_disponibilizacao: string | null;
+  texto: string | null;
+  destinatarios: { nome: string; polo: string }[];
+  advogados: { nome: string; oab: string | null }[];
+  link: string | null;
+}
+
 export default function Search() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -92,6 +105,8 @@ export default function Search() {
   const [pep, setPep] = useState<Pep[]>([]);
   const [sancoes, setSancoes] = useState<Sancao[]>([]);
   const [processos, setProcessos] = useState<Processo[]>([]);
+  const [processosNome, setProcessosNome] = useState<ProcessoNome[]>([]);
+  const [djenBlocked, setDjenBlocked] = useState(false);
   const [nameSearchNote, setNameSearchNote] = useState(false);
   const [apiStatus, setApiStatus] = useState<{ transparencia: { configured: boolean }; datajud: { configured: boolean; using_public_key?: boolean } } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -110,6 +125,8 @@ export default function Search() {
     setPep([]);
     setSancoes([]);
     setProcessos([]);
+    setProcessosNome([]);
+    setDjenBlocked(false);
     setNameSearchNote(false);
     setMeta(null);
 
@@ -129,16 +146,21 @@ export default function Search() {
         const promises: Promise<any>[] = [api.get('/search', { params })];
 
         if (isPureName(q)) {
-          promises.push(api.get('/pessoa/busca', { params: { nome: q } }).catch(() => null));
+          promises.push(
+            api.get('/pessoa/busca', { params: { nome: q } }).catch(() => null),
+            api.get('/pessoa/processos-nome', { params: { nome: q } }).catch(() => null)
+          );
           setNameSearchNote(true);
         }
 
-        const [localRes, buscaRes] = await Promise.all(promises);
+        const [localRes, buscaRes, djenRes] = await Promise.all(promises);
 
         setLocalResults(localRes.data.data);
         setMeta(localRes.data.meta);
         if (buscaRes?.data?.pep) setPep(buscaRes.data.pep);
         if (buscaRes?.data?.sancoes) setSancoes(buscaRes.data.sancoes);
+        if (djenRes?.data?.blocked) setDjenBlocked(true);
+        else if (djenRes?.data?.data) setProcessosNome(djenRes.data.data);
       }
     } catch (err: any) {
       if (err.response?.data?.upgrade_required) {
@@ -159,7 +181,7 @@ export default function Search() {
     navigate(`/search?${params.toString()}`);
   };
 
-  const hasResults = cnpjResult || localResults.length > 0 || pep.length > 0 || sancoes.length > 0 || processos.length > 0;
+  const hasResults = cnpjResult || localResults.length > 0 || pep.length > 0 || sancoes.length > 0 || processos.length > 0 || processosNome.length > 0;
   const transparenciaNeeded = apiStatus && !apiStatus.transparencia.configured;
 
   return (
@@ -181,7 +203,10 @@ export default function Search() {
           </svg>
           <div className="text-sm">
             <p className="font-semibold text-blue-800 mb-1">Sobre a busca por nome</p>
-            <p className="text-blue-700">Por exigencia da LGPD, nao existe base publica com dados de qualquer cidadao por nome. A busca cobre fontes oficiais abertas: pessoas politicamente expostas (PEP), sancionados (CEIS/CNEP) e a base local. Para processos, informe o numero CNJ (20 digitos); para empresas, o CNPJ.</p>
+            <p className="text-blue-700">A busca por nome cobre fontes oficiais abertas: processos no DJEN/CNJ, pessoas politicamente expostas (PEP), sancionados (CEIS/CNEP) e a base local. Dados de cidadaos sem cargo publico/processos nao sao publicos (LGPD).</p>
+            {djenBlocked && (
+              <p className="text-blue-600 mt-2 text-xs">Nota: a consulta de processos por nome (DJEN/CNJ) so aceita acesso a partir do Brasil. Neste servidor (fora do BR) ela fica indisponivel — veja a observacao no chat sobre hospedagem.</p>
+            )}
           </div>
         </div>
       )}
@@ -350,6 +375,43 @@ export default function Search() {
                       {p.ultima_movimentacao && <span>Ultima mov.: {p.ultima_movimentacao}</span>}
                       {p.ultima_atualizacao && <span>Atualizado: {new Date(p.ultima_atualizacao).toLocaleDateString('pt-BR')}</span>}
                       {p.total_movimentos > 0 && <span>{p.total_movimentos} movimentos</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Processos por nome (DJEN) */}
+          {processosNome.length > 0 && (
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <h2 className="text-sm font-semibold text-gray-700">Processos por nome ({processosNome.length})</h2>
+                <SourceBadge label="DJEN — CNJ" color="purple" />
+              </div>
+              <div className="space-y-3">
+                {processosNome.map((p, i) => (
+                  <div key={i} className="bg-white rounded-xl border border-purple-100 p-5">
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      {p.numero && <span className="font-mono text-xs text-brand-600 font-semibold bg-brand-50 px-2 py-0.5 rounded break-all">{p.numero}</span>}
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        {p.tribunal && <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-medium">{p.tribunal}</span>}
+                        {p.tipo_comunicacao && <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">{p.tipo_comunicacao}</span>}
+                      </div>
+                    </div>
+                    {p.classe && <p className="text-sm font-medium text-gray-800 mb-1">{p.classe}</p>}
+                    {p.destinatarios.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mb-2">
+                        {p.destinatarios.slice(0, 6).map((d, j) => (
+                          <span key={j} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded">{d.polo ? `${d.polo}: ` : ''}{d.nome}</span>
+                        ))}
+                      </div>
+                    )}
+                    {p.texto && <p className="text-xs text-gray-500 mb-2 leading-relaxed">{p.texto}</p>}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
+                      {p.orgao && <span>{p.orgao}</span>}
+                      {p.data_disponibilizacao && <span>Publicado: {new Date(p.data_disponibilizacao).toLocaleDateString('pt-BR')}</span>}
+                      {p.advogados.length > 0 && <span>Adv.: {p.advogados.slice(0, 2).map(a => a.nome).join(', ')}</span>}
                     </div>
                   </div>
                 ))}

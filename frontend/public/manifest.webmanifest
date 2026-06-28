@@ -1,0 +1,18 @@
+{
+  "name": "DataSearch — Consulta de Dados Públicos",
+  "short_name": "DataSearch",
+  "description": "Busca de dados públicos de pessoas e empresas: CNPJ (Receita Federal), processos (CNJ), políticos (PEP) e sanções.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f0f4ff",
+  "theme_color": "#4a48e4",
+  "lang": "pt-BR",
+  "categories": ["business", "utilities", "productivity"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
