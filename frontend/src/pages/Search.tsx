@@ -56,11 +56,16 @@ interface Processo {
   numero: string;
   tribunal: string;
   classe: string | null;
+  grau: string | null;
+  sistema: string | null;
   assuntos: string[];
   partes: { nome: string; tipo: string }[];
-  data_ajuizamento: string;
+  data_ajuizamento: string | null;
   orgao_julgador: string | null;
   ultima_movimentacao: string | null;
+  ultima_atualizacao: string | null;
+  formato: string | null;
+  fonte_tribunal: string;
 }
 
 export default function Search() {
@@ -75,7 +80,7 @@ export default function Search() {
   const [cnpjResult, setCnpjResult] = useState<Entity | null>(null);
   const [servidores, setServidores] = useState<Servidor[]>([]);
   const [processos, setProcessos] = useState<Processo[]>([]);
-  const [apiStatus, setApiStatus] = useState<{ transparencia: { configured: boolean }; datajud: { configured: boolean } } | null>(null);
+  const [apiStatus, setApiStatus] = useState<{ transparencia: { configured: boolean }; datajud: { configured: boolean; using_public_key?: boolean } } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -107,7 +112,7 @@ export default function Search() {
         if ((type === '' || type === 'person') && isPureName(q)) {
           promises.push(
             api.get('/pessoa/servidores', { params: { nome: q } }).catch(() => null),
-            api.get('/pessoa/processos', { params: { nome: q, tribunal: 'tjsp' } }).catch(() => null)
+            api.get('/pessoa/processos', { params: { nome: q } }).catch(() => null)
           );
         }
 
@@ -138,7 +143,7 @@ export default function Search() {
   };
 
   const hasResults = cnpjResult || localResults.length > 0 || servidores.length > 0 || processos.length > 0;
-  const keysNeeded = apiStatus && (!apiStatus.transparencia.configured || !apiStatus.datajud.configured);
+  const transparenciaNeeded = apiStatus && !apiStatus.transparencia.configured;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -151,22 +156,15 @@ export default function Search() {
         )}
       </div>
 
-      {/* API key notice */}
-      {keysNeeded && (type === '' || type === 'person') && !isCNPJ(q) && (
+      {/* Transparencia key notice */}
+      {transparenciaNeeded && (type === '' || type === 'person') && !isCNPJ(q) && (
         <div className="bg-amber-50 border border-amber-100 rounded-xl px-5 py-4 mb-6 flex items-start gap-3">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 mt-0.5">
             <circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>
           </svg>
           <div className="text-sm">
-            <p className="font-semibold text-amber-800 mb-1">Chaves de API necessarias para dados reais de Pessoa Fisica</p>
-            <div className="text-amber-700 space-y-1">
-              {!apiStatus?.transparencia.configured && (
-                <p>Portal da Transparencia (servidores publicos): cadastre em <span className="font-mono text-xs bg-amber-100 px-1 rounded">portaldatransparencia.gov.br/api-de-dados/cadastrar-email</span> e configure <span className="font-mono text-xs bg-amber-100 px-1 rounded">TRANSPARENCIA_API_KEY</span></p>
-              )}
-              {!apiStatus?.datajud.configured && (
-                <p>CNJ DataJud (processos): cadastre em <span className="font-mono text-xs bg-amber-100 px-1 rounded">datajud-wiki.cnj.jus.br/api-publica/acesso</span> e configure <span className="font-mono text-xs bg-amber-100 px-1 rounded">DATAJUD_API_KEY</span></p>
-              )}
-            </div>
+            <p className="font-semibold text-amber-800 mb-1">Para buscar servidores publicos</p>
+            <p className="text-amber-700">Cadastre sua chave gratuita em <span className="font-mono text-xs bg-amber-100 px-1 rounded">portaldatransparencia.gov.br/api-de-dados/cadastrar-email</span> e configure <span className="font-mono text-xs bg-amber-100 px-1 rounded">TRANSPARENCIA_API_KEY</span> no Railway.</p>
           </div>
         </div>
       )}
@@ -270,34 +268,38 @@ export default function Search() {
               <div className="flex items-center gap-2 mb-3">
                 <h2 className="text-sm font-semibold text-gray-700">Processos Judiciais ({processos.length})</h2>
                 <SourceBadge label="CNJ DataJud" color="purple" />
+                <span className="text-xs text-gray-400">11 tribunais consultados</span>
               </div>
               <div className="space-y-3">
                 {processos.map((p, i) => (
                   <div key={p.numero || i} className="bg-white rounded-xl border border-purple-100 p-5">
                     <div className="flex items-start justify-between gap-3 mb-2">
-                      <span className="font-mono text-xs text-brand-600 font-semibold bg-brand-50 px-2 py-0.5 rounded">{p.numero}</span>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {p.tribunal && <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-medium">{p.tribunal}</span>}
+                      <span className="font-mono text-xs text-brand-600 font-semibold bg-brand-50 px-2 py-0.5 rounded break-all">{p.numero}</span>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        {p.fonte_tribunal && <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-medium">{p.fonte_tribunal}</span>}
+                        {p.grau && <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">{p.grau}</span>}
+                        {p.formato && <span className="text-xs bg-gray-50 text-gray-400 px-2 py-0.5 rounded border border-gray-100">{p.formato}</span>}
                       </div>
                     </div>
                     {p.classe && <p className="text-sm font-medium text-gray-800 mb-1">{p.classe}</p>}
                     {p.assuntos.length > 0 && (
                       <div className="flex flex-wrap gap-1 mb-2">
-                        {p.assuntos.slice(0, 3).map((a, j) => (
+                        {p.assuntos.slice(0, 4).map((a, j) => (
                           <span key={j} className="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded">{a}</span>
                         ))}
                       </div>
                     )}
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400 mb-2">
                       {p.orgao_julgador && <span>{p.orgao_julgador}</span>}
                       {p.data_ajuizamento && <span>Ajuizado: {new Date(p.data_ajuizamento).toLocaleDateString('pt-BR')}</span>}
                       {p.ultima_movimentacao && <span>Ultima mov.: {p.ultima_movimentacao}</span>}
+                      {p.ultima_atualizacao && <span>Atualizado: {new Date(p.ultima_atualizacao).toLocaleDateString('pt-BR')}</span>}
                     </div>
                     {p.partes.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {p.partes.slice(0, 4).map((pt, j) => (
+                      <div className="flex flex-wrap gap-1">
+                        {p.partes.slice(0, 5).map((pt, j) => (
                           <span key={j} className="text-xs bg-gray-50 text-gray-600 px-2 py-0.5 rounded border border-gray-100">
-                            {pt.tipo}: {pt.nome}
+                            {pt.tipo ? `${pt.tipo}: ` : ''}{pt.nome}
                           </span>
                         ))}
                       </div>
@@ -382,7 +384,7 @@ export default function Search() {
               </div>
               <h3 className="text-lg font-semibold text-gray-900 mb-1">Nenhum resultado encontrado</h3>
               <p className="text-gray-500 text-sm max-w-sm mx-auto">
-                Para CNPJ, digite o numero completo. Para pessoa fisica, use o nome completo. Configure as chaves de API para resultados de fontes governamentais.
+                Para CNPJ, digite o numero completo. Para pessoa fisica, use o nome completo. Processos judiciais sao buscados automaticamente no CNJ DataJud.
               </p>
             </div>
           )}

@@ -63,6 +63,7 @@ router.get('/cnpj/:cnpj', authenticate, async (req: Request, res: Response) => {
   const userResult = await db.execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [req.user!.userId] });
   const user = userResult.rows[0] as any;
 
+  if (!user) { res.status(401).json({ error: 'Sessao expirada. Faca login novamente.' }); return; }
   if (Number(user.searches_used) >= Number(user.searches_limit)) {
     res.status(402).json({ error: 'Limite de buscas atingido.', upgrade_required: true }); return;
   }
@@ -91,6 +92,7 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
   const userResult = await db.execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [req.user!.userId] });
   const user = userResult.rows[0] as any;
 
+  if (!user) { res.status(401).json({ error: 'Sessao expirada. Faca login novamente.' }); return; }
   if (Number(user.searches_used) >= Number(user.searches_limit)) {
     res.status(402).json({ error: 'Limite de buscas atingido.', upgrade_required: true }); return;
   }
