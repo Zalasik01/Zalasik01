@@ -5,6 +5,10 @@ import { Entity, SearchMeta } from '../types';
 import SearchBar from '../components/SearchBar';
 import StatusBadge from '../components/StatusBadge';
 
+// DJEN (busca de processo por nome) e bloqueado pelo CNJ em qualquer cloud.
+// Codigo mantido pronto; mude para true ao rodar em IP residencial/comercial BR.
+const ENABLE_DJEN = false;
+
 function isCNPJ(q: string) { return /^\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}$/.test(q.trim()); }
 function isCPF(q: string) { return /^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/.test(q.trim()); }
 function isProcessNumber(q: string) { return q.replace(/\D/g, '').length === 20; }
@@ -146,10 +150,12 @@ export default function Search() {
         const promises: Promise<any>[] = [api.get('/search', { params })];
 
         if (isPureName(q)) {
-          promises.push(
-            api.get('/pessoa/busca', { params: { nome: q } }).catch(() => null),
-            api.get('/pessoa/processos-nome', { params: { nome: q } }).catch(() => null)
-          );
+          promises.push(api.get('/pessoa/busca', { params: { nome: q } }).catch(() => null));
+          // DJEN (processo por nome) fica pronto, mas inativo: o CloudFront do CNJ
+          // bloqueia acesso de qualquer cloud. Para reativar, defina ENABLE_DJEN=true.
+          if (ENABLE_DJEN) {
+            promises.push(api.get('/pessoa/processos-nome', { params: { nome: q } }).catch(() => null));
+          }
           setNameSearchNote(true);
         }
 
