@@ -7,7 +7,8 @@ import StatusBadge from '../components/StatusBadge';
 
 function isCNPJ(q: string) { return /^\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}$/.test(q.trim()); }
 function isCPF(q: string) { return /^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/.test(q.trim()); }
-function isPureName(q: string) { return !isCNPJ(q) && !isCPF(q) && q.trim().length >= 3; }
+function isProcessNumber(q: string) { return q.replace(/\D/g, '').length === 20; }
+function isPureName(q: string) { return !isCNPJ(q) && !isCPF(q) && !isProcessNumber(q) && q.trim().length >= 3; }
 
 function PersonIcon() {
   return (
@@ -56,15 +57,17 @@ interface Processo {
   numero: string;
   tribunal: string;
   classe: string | null;
+  classe_codigo: number | null;
   grau: string | null;
   sistema: string | null;
+  nivel_sigilo: number | null;
   assuntos: string[];
-  partes: { nome: string; tipo: string }[];
   data_ajuizamento: string | null;
   orgao_julgador: string | null;
   ultima_movimentacao: string | null;
   ultima_atualizacao: string | null;
   formato: string | null;
+  total_movimentos: number;
   fonte_tribunal: string;
 }
 
@@ -80,6 +83,7 @@ export default function Search() {
   const [cnpjResult, setCnpjResult] = useState<Entity | null>(null);
   const [servidores, setServidores] = useState<Servidor[]>([]);
   const [processos, setProcessos] = useState<Processo[]>([]);
+  const [nameSearchNote, setNameSearchNote] = useState(false);
   const [apiStatus, setApiStatus] = useState<{ transparencia: { configured: boolean }; datajud: { configured: boolean; using_public_key?: boolean } } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -96,6 +100,7 @@ export default function Search() {
     setLocalResults([]);
     setServidores([]);
     setProcessos([]);
+    setNameSearchNote(false);
     setMeta(null);
 
     try {
@@ -103,6 +108,10 @@ export default function Search() {
         const clean = q.replace(/\D/g, '');
         const { data } = await api.get(`/search/cnpj/${clean}`);
         setCnpjResult(data.entity);
+      } else if (isProcessNumber(q)) {
+        // CNJ process number -> DataJud lookup by number
+        const { data } = await api.get('/pessoa/processos', { params: { numero: q } });
+        if (data?.data) setProcessos(data.data);
       } else {
         const params: Record<string, string> = { q, page: String(page) };
         if (type) params.type = type;
@@ -110,18 +119,15 @@ export default function Search() {
         const promises: Promise<any>[] = [api.get('/search', { params })];
 
         if ((type === '' || type === 'person') && isPureName(q)) {
-          promises.push(
-            api.get('/pessoa/servidores', { params: { nome: q } }).catch(() => null),
-            api.get('/pessoa/processos', { params: { nome: q } }).catch(() => null)
-          );
+          promises.push(api.get('/pessoa/servidores', { params: { nome: q } }).catch(() => null));
+          setNameSearchNote(true);
         }
 
-        const [localRes, servidoresRes, processosRes] = await Promise.all(promises);
+        const [localRes, servidoresRes] = await Promise.all(promises);
 
         setLocalResults(localRes.data.data);
         setMeta(localRes.data.meta);
         if (servidoresRes?.data?.data) setServidores(servidoresRes.data.data);
-        if (processosRes?.data?.data) setProcessos(processosRes.data.data);
       }
     } catch (err: any) {
       if (err.response?.data?.upgrade_required) {
@@ -151,10 +157,23 @@ export default function Search() {
         <SearchBar initialQuery={q} initialType={type} />
         {q && (
           <p className="text-xs text-gray-400 mt-2 ml-1">
-            Dica: para CNPJ, digite o numero completo. Para pessoa fisica, busque pelo nome completo.
+            Dica: CNPJ (Receita Federal), nome (servidores publicos) ou numero de processo CNJ (20 digitos).
           </p>
         )}
       </div>
+
+      {/* Process-by-name limitation notice */}
+      {!loading && nameSearchNote && (
+        <div className="bg-blue-50 border border-blue-100 rounded-xl px-5 py-4 mb-6 flex items-start gap-3">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 mt-0.5">
+            <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
+          </svg>
+          <div className="text-sm">
+            <p className="font-semibold text-blue-800 mb-1">Busca de processos por nome</p>
+            <p className="text-blue-700">A API publica do CNJ (DataJud) nao expoe nomes das partes por exigencia da LGPD. Para consultar um processo, informe o numero CNJ completo (20 digitos).</p>
+          </div>
+        </div>
+      )}
 
       {/* Transparencia key notice */}
       {transparenciaNeeded && (type === '' || type === 'person') && !isCNPJ(q) && (
@@ -174,7 +193,9 @@ export default function Search() {
           <div className="flex flex-col items-center gap-3">
             <div className="w-8 h-8 border-2 border-brand-600 border-t-transparent rounded-full animate-spin" />
             <span className="text-sm text-gray-500">
-              {isCNPJ(q) ? 'Consultando Receita Federal...' : 'Consultando multiplas fontes...'}
+              {isCNPJ(q) ? 'Consultando Receita Federal...'
+                : isProcessNumber(q) ? 'Consultando CNJ DataJud...'
+                : 'Consultando multiplas fontes...'}
             </span>
           </div>
         </div>
@@ -268,7 +289,6 @@ export default function Search() {
               <div className="flex items-center gap-2 mb-3">
                 <h2 className="text-sm font-semibold text-gray-700">Processos Judiciais ({processos.length})</h2>
                 <SourceBadge label="CNJ DataJud" color="purple" />
-                <span className="text-xs text-gray-400">11 tribunais consultados</span>
               </div>
               <div className="space-y-3">
                 {processos.map((p, i) => (
@@ -289,21 +309,14 @@ export default function Search() {
                         ))}
                       </div>
                     )}
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400 mb-2">
+                    {p.sistema && <p className="text-xs text-gray-500 mb-1">Sistema: <span className="text-gray-700">{p.sistema}</span></p>}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
                       {p.orgao_julgador && <span>{p.orgao_julgador}</span>}
                       {p.data_ajuizamento && <span>Ajuizado: {new Date(p.data_ajuizamento).toLocaleDateString('pt-BR')}</span>}
                       {p.ultima_movimentacao && <span>Ultima mov.: {p.ultima_movimentacao}</span>}
                       {p.ultima_atualizacao && <span>Atualizado: {new Date(p.ultima_atualizacao).toLocaleDateString('pt-BR')}</span>}
+                      {p.total_movimentos > 0 && <span>{p.total_movimentos} movimentos</span>}
                     </div>
-                    {p.partes.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {p.partes.slice(0, 5).map((pt, j) => (
-                          <span key={j} className="text-xs bg-gray-50 text-gray-600 px-2 py-0.5 rounded border border-gray-100">
-                            {pt.tipo ? `${pt.tipo}: ` : ''}{pt.nome}
-                          </span>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 ))}
               </div>

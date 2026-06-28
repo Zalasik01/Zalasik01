@@ -9,8 +9,50 @@ const TRANSPARENCIA_KEY = process.env.TRANSPARENCIA_API_KEY || '';
 const DATAJUD_PUBLIC_KEY = 'cDZHYzlZa0JadVREZDJCendQbXY6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw==';
 const DATAJUD_KEY = process.env.DATAJUD_API_KEY || DATAJUD_PUBLIC_KEY;
 
-// Most searched tribunals — searched in parallel
-const DEFAULT_TRIBUNALS = ['tjsp', 'tjrj', 'tjmg', 'tjrs', 'tjpr', 'tjba', 'tjce', 'stj', 'tst', 'trf1', 'trf3'];
+// State code (positions 15-16 of CNJ number) -> UF, for state/electoral/military courts
+const UF_BY_CODE: Record<string, string> = {
+  '01': 'ac', '02': 'al', '03': 'ap', '04': 'am', '05': 'ba', '06': 'ce', '07': 'df',
+  '08': 'es', '09': 'go', '10': 'ma', '11': 'mt', '12': 'ms', '13': 'mg', '14': 'pa',
+  '15': 'pb', '16': 'pr', '17': 'pe', '18': 'pi', '19': 'rj', '20': 'rn', '21': 'rs',
+  '22': 'ro', '23': 'rr', '24': 'sc', '25': 'se', '26': 'sp', '27': 'to'
+};
+
+const MILITAR_ESTADUAL: Record<string, string> = { '13': 'tjmmg', '21': 'tjmrs', '26': 'tjmsp' };
+
+/**
+ * Derives the DataJud tribunal alias from a CNJ process number.
+ * Format: NNNNNNN-DD.AAAA.J.TR.OOOO (20 digits).
+ * J = justice segment (pos 14), TR = tribunal/region (pos 15-16).
+ */
+function tribunalFromNumber(numero: string): string | null {
+  const digits = numero.replace(/\D/g, '');
+  if (digits.length !== 20) return null;
+  const segmento = digits[13];
+  const tr = digits.substring(14, 16);
+  switch (segmento) {
+    case '1': return 'stf';       // not in public API, but mapped for completeness
+    case '3': return 'stj';
+    case '4': {                   // Justiça Federal -> trf1..trf6
+      const r = parseInt(tr, 10);
+      return r >= 1 && r <= 6 ? `trf${r}` : null;
+    }
+    case '5': {                   // Justiça do Trabalho -> TST (00) or trt1..trt24
+      const r = parseInt(tr, 10);
+      return r === 0 ? 'tst' : `trt${r}`;
+    }
+    case '6': {                   // Justiça Eleitoral -> tre-uf
+      const uf = UF_BY_CODE[tr];
+      return uf ? `tre-${uf}` : null;
+    }
+    case '7': return 'stm';       // Justiça Militar da União
+    case '8': {                   // Justiça Estadual -> tjuf
+      const uf = UF_BY_CODE[tr];
+      return uf ? `tj${uf}` : null;
+    }
+    case '9': return MILITAR_ESTADUAL[tr] || null; // Justiça Militar Estadual
+    default: return null;
+  }
+}
 
 function httpsGet(url: string, headers: Record<string, string> = {}): Promise<any> {
   return new Promise((resolve, reject) => {
@@ -51,44 +93,44 @@ function httpsPost(url: string, body: object, headers: Record<string, string> = 
   });
 }
 
-async function searchDatajudTribunal(tribunal: string, nome: string): Promise<any[]> {
+function formatProcesso(p: any, tribunalAlias: string) {
+  const ultimoMov = Array.isArray(p.movimentos)
+    ? [...p.movimentos].sort((a, b) => (b.dataHora || '').localeCompare(a.dataHora || ''))[0]
+    : null;
+  return {
+    numero: p.numeroProcesso,
+    tribunal: p.tribunal || tribunalAlias.toUpperCase(),
+    classe: p.classe?.nome || null,
+    classe_codigo: p.classe?.codigo || null,
+    grau: p.grau || null,
+    sistema: p.sistema?.nome || null,
+    nivel_sigilo: p.nivelSigilo ?? null,
+    assuntos: p.assuntos?.map((a: any) => a.nome).filter(Boolean) || [],
+    data_ajuizamento: p.dataAjuizamento || null,
+    orgao_julgador: p.orgaoJulgador?.nome || null,
+    ultima_movimentacao: ultimoMov ? `${ultimoMov.nome || ''}${ultimoMov.dataHora ? ' — ' + new Date(ultimoMov.dataHora).toLocaleDateString('pt-BR') : ''}`.trim() : null,
+    ultima_atualizacao: p.dataHoraUltimaAtualizacao || null,
+    formato: p.formato?.nome || null,
+    total_movimentos: Array.isArray(p.movimentos) ? p.movimentos.length : 0,
+    fonte_tribunal: tribunalAlias.toUpperCase()
+  };
+}
+
+async function searchByNumber(numero: string): Promise<any[]> {
+  const tribunal = tribunalFromNumber(numero);
+  if (!tribunal) return [];
   try {
     const url = `https://api-publica.datajud.cnj.jus.br/api_publica_${tribunal}/_search`;
+    const numeroDigits = numero.replace(/\D/g, '');
     const query = {
-      query: {
-        bool: {
-          should: [
-            { match: { 'partes.nome': { query: nome, operator: 'and', fuzziness: 'AUTO' } } },
-            { match_phrase: { 'partes.nome': nome } }
-          ],
-          minimum_should_match: 1
-        }
-      },
+      query: { match: { numeroProcesso: numeroDigits } },
       size: 5,
-      _source: ['numeroProcesso', 'tribunal', 'classe', 'assuntos', 'partes', 'dataAjuizamento',
+      _source: ['numeroProcesso', 'tribunal', 'classe', 'assuntos', 'dataAjuizamento', 'nivelSigilo',
                 'orgaoJulgador', 'movimentos', 'grau', 'sistema', 'formato', 'dataHoraUltimaAtualizacao']
     };
     const result = await httpsPost(url, query, { 'Authorization': `APIKey ${DATAJUD_KEY}` });
     if (result.status !== 200 || !result.body?.hits?.hits?.length) return [];
-    return result.body.hits.hits.map((h: any) => {
-      const p = h._source;
-      const ultimoMov = p.movimentos?.[0];
-      return {
-        numero: p.numeroProcesso,
-        tribunal: p.tribunal || tribunal.toUpperCase(),
-        classe: p.classe?.nome || null,
-        grau: p.grau || null,
-        sistema: p.sistema?.nome || null,
-        assuntos: p.assuntos?.map((a: any) => a.nome).filter(Boolean) || [],
-        partes: p.partes?.map((pt: any) => ({ nome: pt.nome, tipo: pt.tipoParte || pt.tipo })).filter((pt: any) => pt.nome) || [],
-        data_ajuizamento: p.dataAjuizamento || null,
-        orgao_julgador: p.orgaoJulgador?.nome || null,
-        ultima_movimentacao: ultimoMov ? `${ultimoMov.nome || ''} — ${ultimoMov.dataHora ? new Date(ultimoMov.dataHora).toLocaleDateString('pt-BR') : ''}`.trim() : null,
-        ultima_atualizacao: p.dataHoraUltimaAtualizacao || null,
-        formato: p.formato?.nome || null,
-        fonte_tribunal: tribunal.toUpperCase()
-      };
-    });
+    return result.body.hits.hits.map((h: any) => formatProcesso(h._source, tribunal));
   } catch {
     return [];
   }
@@ -123,46 +165,41 @@ router.get('/servidores', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Process lookup. The public DataJud API does NOT expose party names (LGPD),
+ * so processes can only be found by their CNJ number, not by person name.
+ */
 router.get('/processos', async (req: Request, res: Response) => {
-  const { nome, tribunais } = req.query as Record<string, string>;
-  if (!nome?.trim()) { res.status(400).json({ error: 'Nome obrigatorio.' }); return; }
+  const { numero, nome } = req.query as Record<string, string>;
 
-  const tribunaisList = tribunais
-    ? tribunais.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
-    : DEFAULT_TRIBUNALS;
-
-  try {
-    const results = await Promise.all(tribunaisList.map(t => searchDatajudTribunal(t, nome.trim())));
-    const all = results.flat();
-
-    // Deduplicate by process number
-    const seen = new Set<string>();
-    const unique = all.filter(p => {
-      if (seen.has(p.numero)) return false;
-      seen.add(p.numero);
-      return true;
-    });
-
+  // Name-based search is impossible on the public API — return an honest signal.
+  if (!numero?.trim() && nome?.trim()) {
     res.json({
-      data: unique,
+      data: [],
       source: 'CNJ DataJud',
-      tribunais_consultados: tribunaisList,
-      total: unique.length
+      name_search_unsupported: true,
+      info: 'A API publica do CNJ nao permite busca por nome (LGPD). Informe o numero do processo.'
     });
-  } catch {
-    res.status(503).json({ error: 'Erro ao consultar CNJ DataJud.' });
+    return;
   }
-});
 
-// Search a specific tribunal
-router.get('/processos/:tribunal', async (req: Request, res: Response) => {
-  const { nome } = req.query as Record<string, string>;
-  const tribunal = req.params.tribunal.toLowerCase();
-  if (!nome?.trim()) { res.status(400).json({ error: 'Nome obrigatorio.' }); return; }
+  if (!numero?.trim()) { res.status(400).json({ error: 'Numero do processo obrigatorio.' }); return; }
+
+  const numeroDigits = numero.replace(/\D/g, '');
+  if (numeroDigits.length !== 20) {
+    res.status(400).json({ error: 'Numero de processo invalido. Use o formato CNJ (20 digitos).' });
+    return;
+  }
+
+  const tribunal = tribunalFromNumber(numeroDigits);
+  if (!tribunal) {
+    res.status(400).json({ error: 'Nao foi possivel identificar o tribunal a partir do numero informado.' });
+    return;
+  }
 
   try {
-    const data = await searchDatajudTribunal(tribunal, nome.trim());
-    res.json({ data, source: `CNJ DataJud — ${tribunal.toUpperCase()}`, total: data.length });
+    const data = await searchByNumber(numeroDigits);
+    res.json({ data, source: `CNJ DataJud — ${tribunal.toUpperCase()}`, tribunal, total: data.length });
   } catch {
     res.status(503).json({ error: 'Erro ao consultar CNJ DataJud.' });
   }
@@ -171,7 +208,7 @@ router.get('/processos/:tribunal', async (req: Request, res: Response) => {
 router.get('/status', (_req: Request, res: Response) => {
   res.json({
     transparencia: { configured: !!TRANSPARENCIA_KEY, env_var: 'TRANSPARENCIA_API_KEY', url: 'https://portaldatransparencia.gov.br/api-de-dados/cadastrar-email' },
-    datajud: { configured: true, using_public_key: !process.env.DATAJUD_API_KEY, tribunais_disponiveis: DEFAULT_TRIBUNALS }
+    datajud: { configured: true, using_public_key: !process.env.DATAJUD_API_KEY, search_by: 'numero_processo', note: 'API publica nao expoe nomes de partes (LGPD)' }
   });
 });
 
