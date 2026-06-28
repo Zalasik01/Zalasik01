@@ -54,9 +54,11 @@ function tribunalFromNumber(numero: string): string | null {
   }
 }
 
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+
 function httpsGet(url: string, headers: Record<string, string> = {}): Promise<any> {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { headers, timeout: 10000 }, (res) => {
+    const req = https.get(url, { headers, timeout: 12000 }, (res) => {
       let data = '';
       res.on('data', (c) => { data += c; });
       res.on('end', () => {
@@ -243,6 +245,51 @@ router.get('/processos', async (req: Request, res: Response) => {
   } catch {
     res.status(503).json({ error: 'Erro ao consultar CNJ DataJud.' });
   }
+});
+
+/**
+ * Busca processos por NOME da parte via DJEN (Diario de Justica Eletronico
+ * Nacional) / API Comunica do CNJ. Diferente do DataJud, as comunicacoes
+ * processuais publicadas no DJEN contem os nomes das partes — é a forma
+ * legitima e publica de pesquisar processos por nome (semelhante ao Jusbrasil).
+ */
+async function buscarDJEN(nome: string): Promise<{ data: any[]; blocked: boolean }> {
+  try {
+    const url = `https://comunicaapi.pje.jus.br/api/v1/comunicacao?nomeParte=${encodeURIComponent(nome)}&pagina=1&itensPorPagina=15`;
+    const r = await httpsGet(url, { 'Accept': 'application/json', 'User-Agent': BROWSER_UA });
+    if (r.status === 403) return { data: [], blocked: true };
+    const items = Array.isArray(r.body?.items) ? r.body.items : (Array.isArray(r.body) ? r.body : []);
+    if (!items.length) return { data: [], blocked: false };
+    const data = items.map((it: any) => ({
+      numero: it.numero_processo || it.numeroprocessocommascara || it.numeroProcesso || null,
+      tribunal: it.siglaTribunal || it.sigla_tribunal || null,
+      orgao: it.nomeOrgao || it.nome_orgao || null,
+      classe: it.nomeClasse || it.nome_classe || null,
+      tipo_comunicacao: it.tipoComunicacao || it.tipo_comunicacao || it.tipoDocumento || null,
+      data_disponibilizacao: it.data_disponibilizacao || it.dataDisponibilizacao || null,
+      texto: (it.texto || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400) || null,
+      destinatarios: (it.destinatarios || []).map((d: any) => ({ nome: d.nome, polo: d.polo })).filter((d: any) => d.nome),
+      advogados: (it.destinatarioadvogados || it.advogados || []).map((a: any) => {
+        const adv = a.advogado || a;
+        return adv?.nome ? { nome: adv.nome, oab: adv.numero_oab ? `${adv.numero_oab}/${adv.uf_oab || ''}` : null } : null;
+      }).filter(Boolean),
+      link: it.link || null
+    }));
+    return { data, blocked: false };
+  } catch {
+    return { data: [], blocked: false };
+  }
+}
+
+router.get('/processos-nome', async (req: Request, res: Response) => {
+  const { nome } = req.query as Record<string, string>;
+  if (!nome?.trim()) { res.status(400).json({ error: 'Nome obrigatorio.' }); return; }
+  const { data, blocked } = await buscarDJEN(nome.trim());
+  if (blocked) {
+    res.json({ data: [], source: 'DJEN/CNJ', blocked: true, info: 'Servico DJEN bloqueou o acesso (restricao geografica do CNJ).' });
+    return;
+  }
+  res.json({ data, source: 'DJEN — Diario de Justica Eletronico Nacional (CNJ)', total: data.length });
 });
 
 router.get('/status', (_req: Request, res: Response) => {
