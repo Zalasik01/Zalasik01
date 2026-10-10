@@ -19,7 +19,9 @@ export default function Copilot() {
   const endRef = useRef<HTMLDivElement>(null)
   const timer = useRef<number | undefined>(undefined)
 
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }), [messages])
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [messages])
   useEffect(() => () => window.clearInterval(timer.current), [])
 
   const ask = (question: string) => {

@@ -59,8 +59,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(() => load<Session>(SESSION_KEY))
   const [toasts, setToasts] = useState<Toast[]>([])
 
-  useEffect(() => save(DB_KEY, db), [db])
-  useEffect(() => save(SESSION_KEY, session), [session])
+  useEffect(() => {
+    save(DB_KEY, db)
+  }, [db])
+  useEffect(() => {
+    save(SESSION_KEY, session)
+  }, [session])
 
   const toast = useCallback((title: string, tone: Toast['tone'] = 'success') => {
     const id = uid()
